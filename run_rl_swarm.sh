@@ -151,53 +151,8 @@ check_cuda_installation() {
     
     if [ "$GPU_AVAILABLE" = true ] && ([ "$CUDA_AVAILABLE" = false ] || [ "$NVCC_AVAILABLE" = false ]); then
         echo -e "${YELLOW}${BOLD}[!] NVIDIA GPU is available but CUDA environment is not completely set up${NC}"
-        read -p "Would you like to install CUDA and NVCC? [Y/n] " install_choice
-        install_choice=${install_choice:-Y}
-        
-        if [[ $install_choice =~ ^[Yy]$ ]]; then
-            echo -e "${CYAN}${BOLD}[✓] Downloading and running CUDA installation script from GitHub...${NC}"
-            bash <(curl -sSL https://raw.githubusercontent.com/zunxbt/gensyn-testnet/main/cuda.sh)
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}${BOLD}[✓] CUDA installation script completed successfully${NC}"
-                source ~/.profile 2>/dev/null || true
-                source ~/.bashrc 2>/dev/null || true
-                
-                if [ -f "/etc/profile.d/cuda.sh" ]; then
-                    source /etc/profile.d/cuda.sh
-                fi
-                
-                if [ -d "/usr/local/cuda/bin" ] && [[ ":$PATH:" != *":/usr/local/cuda/bin:"* ]]; then
-                    export PATH="/usr/local/cuda/bin:$PATH"
-                fi
-                
-                if [ -d "/usr/local/cuda/lib64" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/local/cuda/lib64:"* ]]; then
-                    export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
-                fi
-                
-                if command -v nvcc &> /dev/null; then
-                    NVCC_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
-                    echo -e "${GREEN}${BOLD}[✓] NVCC successfully installed (version $NVCC_VERSION)${NC}"
-                    NVCC_AVAILABLE=true
-                else
-                    echo -e "${YELLOW}${BOLD}[!] NVCC installation may require a system restart${NC}"
-                    echo -e "${YELLOW}${BOLD}[!] If you continue to have issues after this script completes, please restart your system${NC}"
-                fi
-                
-                if command -v nvidia-smi &> /dev/null; then
-                    echo -e "${CYAN}${BOLD}[✓] Current NVIDIA driver information:${NC}"
-                    nvidia-smi --query-gpu=driver_version,name,temperature.gpu,utilization.gpu,utilization.memory --format=csv,noheader
-                fi
-            else
-                echo -e "${RED}${BOLD}[✗] CUDA installation failed${NC}"
-                echo -e "${YELLOW}${BOLD}[!] Please try installing CUDA manually by following NVIDIA's installation guide${NC}"
-                echo -e "${YELLOW}${BOLD}[!] Proceeding with CPU-only mode${NC}"
-                CPU_ONLY="true"
-            fi
-        else
-            echo -e "${YELLOW}${BOLD}[!] Proceeding without CUDA installation${NC}"
-            echo -e "${YELLOW}${BOLD}[!] CPU-only mode will be used${NC}"
-            CPU_ONLY="true"
-        fi
+        echo -e "${YELLOW}${BOLD}[!] Defaulting to CPU-only mode (CUDA installation skipped)${NC}"
+        CPU_ONLY="true"
     elif [ "$GPU_AVAILABLE" = true ] && [ "$CUDA_AVAILABLE" = true ] && [ "$NVCC_AVAILABLE" = true ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU with CUDA environment properly configured${NC}"
         CPU_ONLY="false"
@@ -219,32 +174,14 @@ else
     echo -e "\n${GREEN}${BOLD}[✓] Running with GPU acceleration${NC}"
 fi
 
-while true; do
-    echo -e "\n\033[36m\033[1mPlease select a swarm to join:\n[A] Math\n[B] Math Hard\033[0m"
-    read -p "> " ab
-    ab=${ab:-A}
-    case $ab in
-        [Aa]*)  USE_BIG_SWARM=false; break ;;
-        [Bb]*)  USE_BIG_SWARM=true; break ;;
-        *)      echo ">>> Please answer A or B." ;;
-    esac
-done
+# 默认选择 [A] Math
+USE_BIG_SWARM=false
+SWARM_CONTRACT="$SMALL_SWARM_CONTRACT"
+echo -e "${CYAN}${BOLD}[✓] Selected swarm: [A] Math${NC}"
 
-if [ "$USE_BIG_SWARM" = true ]; then
-    SWARM_CONTRACT="$BIG_SWARM_CONTRACT"
-else
-    SWARM_CONTRACT="$SMALL_SWARM_CONTRACT"
-fi
-
-while true; do
-    echo -e "\n\033[36m\033[1mHow many parameters (in billions)? [0.5, 1.5, 7, 32, 72]\033[0m"
-    read -p "> " pc
-    pc=${pc:-0.5}
-    case $pc in
-        0.5 | 1.5 | 7 | 32 | 72) PARAM_B=$pc; break ;;
-        *) echo ">>> Please answer in [0.5, 1.5, 7, 32, 72]." ;;
-    esac
-done
+# 默认参数规模为 0.5
+PARAM_B=0.5
+echo -e "${CYAN}${BOLD}[✓] Selected parameter size: 0.5 billion${NC}"
 
 cleanup() {
     echo -e "${YELLOW}${BOLD}[✓] Shutting down processes...${NC}"
@@ -370,8 +307,6 @@ else
         CF_ARCH="amd64"
         echo -e "${GREEN}${BOLD}[✓] Detected x86_64 architecture.${NC}"
     elif [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-        NGROK_ARCHSCAN THE QR CODE OR VISIT THE WEBSITE TO LOG IN WITH YOUR EMAIL ADDRESS. THEN YOU CAN CLOSE THE BROWSER AND RETURN HERE TO CONTINUE. THE WHOLE PROCESS USUALLY TAKES 30 SECONDS.
-
         NGROK_ARCH="arm64"
         CF_ARCH="arm64"
         echo -e "${GREEN}${BOLD}[✓] Detected ARM64 architecture.${NC}"
@@ -504,7 +439,7 @@ else
             while [ $counter -lt $MAX_WAIT ]; do
                 CLOUDFLARED_URL=$(grep -o 'https://[^ ]*\.trycloudflare.com' cloudflared_output.log | head -n1)
                 if [ -n "$CLOUDFLARED_URL" ]; then
-                    echo -e "${ GREEN}${BOLD}[✓] Cloudflared tunnel is started successfully.${NC}"
+                    echo -e "${GREEN}${BOLD}[✓] Cloudflared tunnel is started successfully.${NC}"
                     echo -e "\n${CYAN}${BOLD}[✓] Checking if cloudflared URL is working...${NC}"
                     if check_url "$CLOUDFLARED_URL"; then
                         FORWARDING_URL="$CLOUDFLARED_URL"
@@ -691,26 +626,9 @@ echo -e "${RED}${BOLD}[✗] Failed to set up virtual environment.${NC}"
 if [ -z "$CONFIG_PATH" ]; then
     if command -v nvidia-smi &> /dev/null || [ -d "/proc/driver/nvidia" ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU detected${NC}"
-        
-        case "$PARAM_B" in
-            32 | 72) 
-                CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-${PARAM_B}b-bnb-4bit-deepseek-r1.yaml"
-                ;;
-            0.5 | 1.5 | 7) 
-                CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-${PARAM_B}b-deepseek-r1.yaml"
-                ;;
-            *)  
-                echo ">>> Parameter size not recognized. Defaulting to 0.5b."
-                CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
-                ;;
-        esac
-        
-        if [ "$USE_BIG_SWARM" = true ]; then
-            GAME="dapo"
-        else
-            GAME="gsm8k"
-        fi
-        echo -e "${CYAN}${BOLD}[✓] Config file : ${BOLD}$CONFIG_PATH\n${NC}"
+        CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
+        GAME="gsm8k"
+        echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
         echo -e "${CYAN}${BOLD}[✓] Installing GPU-specific requirements, may take few mins depending on your internet speed...${NC}"
         pip install -r "$ROOT"/requirements-gpu.txt
         pip install flash-attn --no-build-isolation
@@ -719,20 +637,16 @@ if [ -z "$CONFIG_PATH" ]; then
         pip install -r "$ROOT"/requirements-cpu.txt
         CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
         GAME="gsm8k"
-        echo -e "${CYAN}${BOLD}[✓] Config file : ${BOLD}$CONFIG_PATH\n${NC}"
+        echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
     fi
 fi
 
+# 默认不推送模型到 Hugging Face
 if [ -n "${HF_TOKEN}" ]; then
     HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}
 else
-    read -p "Would you like to push models you train in the RL swarm to the Hugging Face Hub? [y/N] " yn
-    yn=${yn:-N}
-    case $yn in
-        [Yy]* ) read -p "Enter your Hugging Face access token: " HUGGINGFACE_ACCESS_TOKEN;;
-        [Nn]* ) HUGGINGFACE_ACCESS_TOKEN="None";;
-        * ) echo -e "${YELLOW}>>> No answer was given, so NO models will be pushed to the Hugging Face Hub.${NC}" && HUGGINGFACE_ACCESS_TOKEN="None";;
-    esac
+    HUGGINGFACE_ACCESS_TOKEN="None"
+    echo -e "${YELLOW}${BOLD}[✓] Models will not be pushed to Hugging Face Hub${NC}"
 fi
 
 echo -e "\n${GREEN}${BOLD}[✓] Good luck in the swarm! Your training session is about to begin.\n${NC}"
