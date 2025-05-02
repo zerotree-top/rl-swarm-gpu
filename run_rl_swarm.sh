@@ -261,17 +261,12 @@ done
 
 cleanup() {
     echo -e "${YELLOW}${BOLD}[✓] Shutting down processes...${NC}"
-    rm -r $ROOT_DIR/modal-login/temp-data/*.json 2> /dev/null || true
     kill $SERVER_PID 2>/dev/null || true
     kill $TUNNEL_PID 2>/dev/null || true
     exit 0
 }
 
 trap cleanup INT
-
-if ls "$HOME/rl-swarm/modal-login/temp-data/"*.json 1> /dev/null 2>&1; then
-  rm -r $HOME/rl-swarm/modal-login/temp-data/*.json 2> /dev/null || true
-fi
 
 sleep 2
 
