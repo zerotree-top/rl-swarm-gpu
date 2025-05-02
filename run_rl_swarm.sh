@@ -174,10 +174,10 @@ else
     echo -e "\n${GREEN}${BOLD}[✓] Running with GPU acceleration${NC}"
 fi
 
-# 默认选择 [A] Math
-USE_BIG_SWARM=false
-SWARM_CONTRACT="$SMALL_SWARM_CONTRACT"
-echo -e "${CYAN}${BOLD}[✓] Selected swarm: [A] Math${NC}"
+# 默认选择 [B] Math Hard
+USE_BIG_SWARM=true
+SWARM_CONTRACT="$BIG_SWARM_CONTRACT"
+echo -e "${CYAN}${BOLD}[✓] Selected swarm: [B] Math Hard${NC}"
 
 # 默认参数规模为 0.5
 PARAM_B=0.5
@@ -627,7 +627,7 @@ if [ -z "$CONFIG_PATH" ]; then
     if command -v nvidia-smi &> /dev/null || [ -d "/proc/driver/nvidia" ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU detected${NC}"
         CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
-        GAME="gsm8k"
+        GAME="dapo"
         echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
         echo -e "${CYAN}${BOLD}[✓] Installing GPU-specific requirements, may take few mins depending on your internet speed...${NC}"
         pip install -r "$ROOT"/requirements-gpu.txt
@@ -636,7 +636,7 @@ if [ -z "$CONFIG_PATH" ]; then
         echo -e "${YELLOW}${BOLD}[✓] No GPU detected, using CPU configuration${NC}"
         pip install -r "$ROOT"/requirements-cpu.txt
         CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
-        GAME="gsm8k"
+        GAME="dapo"
         echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
     fi
 fi
