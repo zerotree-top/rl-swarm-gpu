@@ -39,25 +39,20 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo -e "${CYAN}${BOLD}[✓] Debian/Ubuntu detected. Installing build-essential, gcc, g++...${NC}"
     sudo apt update > /dev/null 2>&1
     sudo apt install -y build-essential gcc g++ > /dev/null 2>&1
-
   elif command -v yum &>/dev/null; then
     echo -e "${CYAN}${BOLD}[✓] RHEL/CentOS detected. Installing Development Tools...${NC}"
     sudo yum groupinstall -y "Development Tools" > /dev/null 2>&1
     sudo yum install -y gcc gcc-c++ > /dev/null 2>&1
-
   elif command -v pacman &>/dev/null; then
     echo -e "${CYAN}${BOLD}[✓] Arch Linux detected. Installing base-devel...${NC}"
     sudo pacman -Sy --noconfirm base-devel gcc > /dev/null 2>&1
-
   else
     echo -e "${RED}${BOLD}[✗] Linux detected but unsupported package manager.${NC}"
     exit 1
   fi
-
 elif [[ "$OSTYPE" == "darwin"* ]]; then
   echo -e "${CYAN}${BOLD}[✓] macOS detected. Installing Xcode Command Line Tools...${NC}"
   xcode-select --install > /dev/null 2>&1
-
 else
   echo -e "${RED}${BOLD}[✗] Unsupported OS: $OSTYPE${NC}"
   exit 1
@@ -78,7 +73,6 @@ check_cuda_installation() {
     NVCC_AVAILABLE=false
     
     detect_gpu() {
-
         if command -v lspci &> /dev/null; then
             if lspci | grep -i nvidia &> /dev/null; then
                 echo -e "${GREEN}${BOLD}[✓] NVIDIA GPU detected (via lspci)${NC}"
@@ -91,7 +85,6 @@ check_cuda_installation() {
             return 1 
         fi
         
-
         if command -v nvidia-smi &> /dev/null; then
             if nvidia-smi &> /dev/null; then
                 echo -e "${GREEN}${BOLD}[✓] NVIDIA GPU detected (via nvidia-smi)${NC}"
@@ -110,14 +103,12 @@ check_cuda_installation() {
                 return 0
             fi
         fi
-
-
+        
         if [ -d "/sys/class/gpu" ] || ls /sys/bus/pci/devices/*/vendor 2>/dev/null | xargs cat 2>/dev/null | grep -q "0x10de"; then
             echo -e "${GREEN}${BOLD}[✓] NVIDIA GPU detected (via sysfs)${NC}"
             return 0
         fi
-
-
+        
         echo -e "${YELLOW}${BOLD}[!] No NVIDIA GPU detected with any detection method${NC}"
         return 1
     }
@@ -132,7 +123,6 @@ check_cuda_installation() {
         CPU_ONLY="true"
         return 0
     else
-
         echo -e "${YELLOW}${BOLD}[!] No NVIDIA GPU detected - using CPU-only mode${NC}"
         echo -e "${YELLOW}${BOLD}[!] CUDA installation will be skipped${NC}"
         CPU_ONLY="true"
@@ -142,7 +132,6 @@ check_cuda_installation() {
     if command -v nvidia-smi &> /dev/null; then
         echo -e "${GREEN}${BOLD}[✓] CUDA drivers detected (nvidia-smi found)${NC}"
         CUDA_AVAILABLE=true
-
         echo -e "${CYAN}${BOLD}[✓] GPU information:${NC}"
         nvidia-smi --query-gpu=name,driver_version,temperature.gpu,utilization.gpu --format=csv,noheader
     elif [ -d "/proc/driver/nvidia" ]; then
@@ -231,11 +220,9 @@ else
 fi
 
 while true; do
-    # Prompt the user
     echo -e "\n\033[36m\033[1mPlease select a swarm to join:\n[A] Math\n[B] Math Hard\033[0m"
     read -p "> " ab
-    ab=${ab:-A}  # Default to "A" if Enter is pressed
-
+    ab=${ab:-A}
     case $ab in
         [Aa]*)  USE_BIG_SWARM=false; break ;;
         [Bb]*)  USE_BIG_SWARM=true; break ;;
@@ -248,11 +235,11 @@ if [ "$USE_BIG_SWARM" = true ]; then
 else
     SWARM_CONTRACT="$SMALL_SWARM_CONTRACT"
 fi
+
 while true; do
     echo -e "\n\033[36m\033[1mHow many parameters (in billions)? [0.5, 1.5, 7, 32, 72]\033[0m"
     read -p "> " pc
-    pc=${pc:-0.5}  # Default to "0.5" if the user presses Enter
-
+    pc=${pc:-0.5}
     case $pc in
         0.5 | 1.5 | 7 | 32 | 72) PARAM_B=$pc; break ;;
         *) echo ">>> Please answer in [0.5, 1.5, 7, 32, 72]." ;;
@@ -272,7 +259,6 @@ sleep 2
 
 if [ -f "modal-login/temp-data/userData.json" ]; then
     cd modal-login
-
     echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes, depending on your internet speed...${NC}"
     npm install --legacy-peer-deps
     
@@ -323,12 +309,10 @@ if [ -f "modal-login/temp-data/userData.json" ]; then
     fi
     
     cd ..
-
     ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
     echo -e "\n${CYAN}${BOLD}[✓] ORG_ID has been set to: ${BOLD}$ORG_ID\n${NC}"
 else
     cd modal-login
-
     echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes, depending on your internet speed...${NC}"
     npm install --legacy-peer-deps
     
@@ -386,6 +370,8 @@ else
         CF_ARCH="amd64"
         echo -e "${GREEN}${BOLD}[✓] Detected x86_64 architecture.${NC}"
     elif [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+        NGROK_ARCHSCAN THE QR CODE OR VISIT THE WEBSITE TO LOG IN WITH YOUR EMAIL ADDRESS. THEN YOU CAN CLOSE THE BROWSER AND RETURN HERE TO CONTINUE. THE WHOLE PROCESS USUALLY TAKES 30 SECONDS.
+
         NGROK_ARCH="arm64"
         CF_ARCH="arm64"
         echo -e "${GREEN}${BOLD}[✓] Detected ARM64 architecture.${NC}"
@@ -518,7 +504,7 @@ else
             while [ $counter -lt $MAX_WAIT ]; do
                 CLOUDFLARED_URL=$(grep -o 'https://[^ ]*\.trycloudflare.com' cloudflared_output.log | head -n1)
                 if [ -n "$CLOUDFLARED_URL" ]; then
-                    echo -e "${GREEN}${BOLD}[✓] Cloudflared tunnel is started successfully.${NC}"
+                    echo -e "${ GREEN}${BOLD}[✓] Cloudflared tunnel is started successfully.${NC}"
                     echo -e "\n${CYAN}${BOLD}[✓] Checking if cloudflared URL is working...${NC}"
                     if check_url "$CLOUDFLARED_URL"; then
                         FORWARDING_URL="$CLOUDFLARED_URL"
@@ -666,7 +652,6 @@ else
     fi
 
     cd ..
-
     echo -e "\n${CYAN}${BOLD}[↻] Waiting for you to complete the login process...${NC}"
     while [ ! -f "modal-login/temp-data/userData.json" ]; do
         sleep 3
@@ -692,10 +677,8 @@ else
 
     ENV_FILE="$ROOT"/modal-login/.env
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS version
         sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
     else
-        # Linux version
         sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
     fi
 fi
@@ -709,7 +692,6 @@ if [ -z "$CONFIG_PATH" ]; then
     if command -v nvidia-smi &> /dev/null || [ -d "/proc/driver/nvidia" ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU detected${NC}"
         
-        # Here was the problematic break statement - removing it and fixing logic
         case "$PARAM_B" in
             32 | 72) 
                 CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-${PARAM_B}b-bnb-4bit-deepseek-r1.yaml"
@@ -741,7 +723,6 @@ if [ -z "$CONFIG_PATH" ]; then
     fi
 fi
 
-
 if [ -n "${HF_TOKEN}" ]; then
     HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}
 else
@@ -755,10 +736,42 @@ else
 fi
 
 echo -e "\n${GREEN}${BOLD}[✓] Good luck in the swarm! Your training session is about to begin.\n${NC}"
-[ "$(uname)" = "Darwin" ] && sed -i '' -E -e 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' -e '/startup_timeout: float = 120,/a\'$'\n''    bootstrap_timeout: float = 120,' -e '/anonymous_p2p = await cls\.create\(/a\'$'\n''        bootstrap_timeout=120,' $(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)") || sed -i -E -e 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' -e '/startup_timeout: float = 120,/a\    bootstrap_timeout: float = 120,' -e '/anonymous_p2p = await cls\.create\(/a\        bootstrap_timeout=120,' $(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)")
 
-[ "$(uname)" = "Darwin" ] && sed -i '' -e 's/bootstrap_timeout: Optional\[float\] = None/bootstrap_timeout: float = 120/' -e 's/p2p = await P2P.create(\*\*kwargs)/p2p = await P2P.create(bootstrap_timeout=120, **kwargs)/' $(python3 -c 'import hivemind.dht.node as m; print(m.__file__)') || sed -i -e 's/bootstrap_timeout: Optional\[float\] = None/bootstrap_timeout: float = 120/' -e 's/p2p = await P2P.create(\*\*kwargs)/p2p = await P2P.create(bootstrap_timeout=120, **kwargs)/' $(python3 -c 'import hivemind.dht.node as m; print(m.__file__)')
+# 修改 hivemind.p2p.p2p_daemon 和 hivemind.dht.node 文件，防止重复添加 bootstrap_timeout
+P2P_DAEMON_FILE=$(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)")
+DHT_NODE_FILE=$(python3 -c "import hivemind.dht.node as m; print(m.__file__)")
 
+if [ "$(uname)" = "Darwin" ]; then
+    # macOS
+    # 更新 startup_timeout
+    sed -i '' -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' "$P2P_DAEMON_FILE"
+    # 检查 P2P.create 中是否已存在 bootstrap_timeout
+    if ! grep -q "bootstrap_timeout: float = 120" "$P2P_DAEMON_FILE"; then
+        sed -i '' -E '/startup_timeout: float = 120,/a\'$'\n''    bootstrap_timeout: float = 120,' "$P2P_DAEMON_FILE"
+    fi
+    # 检查 P2P.is_identity_taken 中是否已存在 bootstrap_timeout 调用
+    if ! grep -q "bootstrap_timeout=120" "$P2P_DAEMON_FILE"; then
+        sed -i '' -E '/anonymous_p2p = await cls\.create\(/a\'$'\n''        bootstrap_timeout=120,' "$P2P_DAEMON_FILE"
+    fi
+    # 更新 dht.node
+    sed -i '' -e 's/bootstrap_timeout: Optional\[float\] = None/bootstrap_timeout: float = 120/' "$DHT_NODE_FILE"
+    sed -i '' -e 's/p2p = await P2P.create(\*\*kwargs)/p2p = await P2P.create(bootstrap_timeout=120, **kwargs)/' "$DHT_NODE_FILE"
+else
+    # Linux
+    # 更新 startup_timeout
+    sed -i -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' "$P2P_DAEMON_FILE"
+    # 检查 P2P.create 中是否已存在 bootstrap_timeout
+    if ! grep -q "bootstrap_timeout: float = 120" "$P2P_DAEMON_FILE"; then
+        sed -i -E '/startup_timeout: float = 120,/a\    bootstrap_timeout: float = 120,' "$P2P_DAEMON_FILE"
+    fi
+    # 检查 P2P.is_identity_taken 中是否已存在 bootstrap_timeout 调用
+    if ! grep -q "bootstrap_timeout=120" "$P2P_DAEMON_FILE"; then
+        sed -i -E '/anonymous_p2p = await cls\.create\(/a\        bootstrap_timeout=120,' "$P2P_DAEMON_FILE"
+    fi
+    # 更新 dht.node
+    sed -i -e 's/bootstrap_timeout: Optional\[float\] = None/bootstrap_timeout: float = 120/' "$DHT_NODE_FILE"
+    sed -i -e 's/p2p = await P2P.create(\*\*kwargs)/p2p = await P2P.create(bootstrap_timeout=120, **kwargs)/' "$DHT_NODE_FILE"
+fi
 
 if [ -n "$ORG_ID" ]; then
     python -m hivemind_exp.gsm8k.train_single_gpu \
