@@ -38,21 +38,21 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   if command -v apt &>/dev/null; then
     echo -e "${CYAN}${BOLD}[✓] Debian/Ubuntu detected. Installing build-essential, gcc, g++...${NC}"
     sudo apt update > /dev/null 2>&1
-    sudo apt install -y build-essential gcc g++ > /dev/null 2>&1
+    sudo apt install -y build-essential gcc g++ > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
   elif command -v yum &>/dev/null; then
     echo -e "${CYAN}${BOLD}[✓] RHEL/CentOS detected. Installing Development Tools...${NC}"
     sudo yum groupinstall -y "Development Tools" > /dev/null 2>&1
-    sudo yum install -y gcc gcc-c++ > /dev/null 2>&1
+    sudo yum install -y gcc gcc-c++ > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
   elif command -v pacman &>/dev/null; then
     echo -e "${CYAN}${BOLD}[✓] Arch Linux detected. Installing base-devel...${NC}"
-    sudo pacman -Sy --noconfirm base-devel gcc > /dev/null 2>&1
+    sudo pacman -Sy --noconfirm base-devel gcc > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
   else
     echo -e "${RED}${BOLD}[✗] Linux detected but unsupported package manager.${NC}"
     exit 1
   fi
 elif [[ "$OSTYPE" == "darwin"* ]]; then
   echo -e "${CYAN}${BOLD}[✓] macOS detected. Installing Xcode Command Line Tools...${NC}"
-  xcode-select --install > /dev/null 2>&1
+  xcode-select --install > /dev/null 2>&1 || true
 else
   echo -e "${RED}${BOLD}[✗] Unsupported OS: $OSTYPE${NC}"
   exit 1
@@ -63,6 +63,7 @@ if command -v gcc &>/dev/null; then
   echo -e "${CYAN}${BOLD}[✓] Exported CC=$CC${NC}"
 else
   echo -e "${RED}${BOLD}[✗] gcc not found. Please install it manually.${NC}"
+  exit 1
 fi
 
 check_cuda_installation() {
@@ -151,8 +152,53 @@ check_cuda_installation() {
     
     if [ "$GPU_AVAILABLE" = true ] && ([ "$CUDA_AVAILABLE" = false ] || [ "$NVCC_AVAILABLE" = false ]); then
         echo -e "${YELLOW}${BOLD}[!] NVIDIA GPU is available but CUDA environment is not completely set up${NC}"
-        echo -e "${YELLOW}${BOLD}[!] Defaulting to CPU-only mode (CUDA installation skipped)${NC}"
-        CPU_ONLY="true"
+        echo -e "${CYAN}${BOLD}[✓] Automatically installing CUDA and NVCC...${NC}"
+        CUDA_SCRIPT_URLS=(
+            "https://raw.githubusercontent.com/zunxbt/gensyn-testnet/main/cuda.sh"
+            "https://example.com/backup/cuda.sh" # 备用 URL，可替换为实际地址
+        )
+        for url in "${CUDA_SCRIPT_URLS[@]}"; do
+            if bash <(curl -sSL --connect-timeout 10 "$url"); then
+                echo -e "${GREEN}${BOLD}[✓] CUDA installation script completed successfully${NC}"
+                source ~/.profile 2>/dev/null || true
+                source ~/.bashrc 2>/dev/null || true
+                
+                if [ -f "/etc/profile.d/cuda.sh" ]; then
+                    source /etc/profile.d/cuda.sh
+                fi
+                
+                if [ -d "/usr/local/cuda/bin" ] && [[ ":$PATH:" != *":/usr/local/cuda/bin:"* ]]; then
+                    export PATH="/usr/local/cuda/bin:$PATH"
+                fi
+                
+                if [ -d "/usr/local/cuda/lib64" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/local/cuda/lib64:"* ]]; then
+                    export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+                fi
+                
+                if command -v nvcc &> /dev/null; then
+                    NVCC_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
+                    echo -e "${GREEN}${BOLD}[✓] NVCC successfully installed (version $NVCC_VERSION)${NC}"
+                    NVCC_AVAILABLE=true
+                else
+                    echo -e "${YELLOW}${BOLD}[!] NVCC installation may require a system restart${NC}"
+                fi
+                
+                if command -v nvidia-smi &> /dev/null; then
+                    echo -e "${CYAN}${BOLD}[✓] Current NVIDIA driver information:${NC}"
+                    nvidia-smi --query-gpu=driver_version,name,temperature.gpu,utilization.gpu,utilization.memory --format=csv,noheader
+                fi
+                break
+            else
+                echo -e "${RED}${BOLD}[✗] Failed to download or run CUDA installation script from $url${NC}"
+            fi
+        done
+        
+        if [ "$NVCC_AVAILABLE" = false ] || [ "$CUDA_AVAILABLE" = false ]; then
+            echo -e "${YELLOW}${BOLD}[!] Proceeding with CPU-only mode due to CUDA installation failure${NC}"
+            CPU_ONLY="true"
+        else
+            CPU_ONLY="false"
+        fi
     elif [ "$GPU_AVAILABLE" = true ] && [ "$CUDA_AVAILABLE" = true ] && [ "$NVCC_AVAILABLE" = true ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU with CUDA environment properly configured${NC}"
         CPU_ONLY="false"
@@ -187,46 +233,45 @@ cleanup() {
     echo -e "${YELLOW}${BOLD}[✓] Shutting down processes...${NC}"
     kill $SERVER_PID 2>/dev/null || true
     kill $TUNNEL_PID 2>/dev/null || true
+    rm -f server.log localtunnel_output.log cloudflared_output.log ngrok_output.log
     exit 0
 }
 
 trap cleanup INT
 
-sleep 2
-
-if [ -f "modal-login/temp-data/userData.json" ]; then
+setup_modal_login() {
     cd modal-login
-    echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes, depending on your internet speed...${NC}"
-    npm install --legacy-peer-deps
+    echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes...${NC}"
+    npm install --legacy-peer-deps > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install npm dependencies${NC}"; exit 1; }
     
     echo -e "\n${CYAN}${BOLD}[✓] Starting the development server...${NC}"
     if ! command -v ss &>/dev/null; then
-      echo -e "${YELLOW}[!] 'ss' not found. Attempting to install 'iproute2'...${NC}"
-      if command -v apt &>/dev/null; then
-        sudo apt update && sudo apt install -y iproute2
-      elif command -v yum &>/dev/null; then
-        sudo yum install -y iproute
-      elif command -v pacman &>/dev/null; then
-        sudo pacman -Sy iproute2
-      else
-        echo -e "${RED}[✗] Could not install 'ss'. Package manager not found.${NC}"
-        exit 1
-      fi
+        echo -e "${YELLOW}[!] 'ss' not found. Attempting to install 'iproute2'...${NC}"
+        if command -v apt &>/dev/null; then
+            sudo apt update && sudo apt install -y iproute2 > /dev/null 2>&1
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y iproute > /dev/null 2>&1
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -Sy iproute2 > /dev/null 2>&1
+        else
+            echo -e "${RED}[✗] Could not install 'ss'. Package manager not found.${NC}"
+            exit 1
+        fi
     fi
     
-    PORT_LINE=$(ss -ltnp | grep ":3000 ")
+    PORT_LINE=$(ss -ltnp | grep ":3000 " 2>/dev/null)
     if [ -n "$PORT_LINE" ]; then
-      PID=$(echo "$PORT_LINE" | grep -oP 'pid=\K[0-9]+')
-      if [ -n "$PID" ]; then
-        echo -e "${YELLOW}[!] Port 3000 is in use. Killing process: $PID${NC}"
-        kill -9 $PID
-        sleep 2
-      fi
+        PID=$(echo "$PORT_LINE" | grep -oP 'pid=\K[0-9]+')
+        if [ -n "$PID" ]; then
+            echo -e "${YELLOW}[!] Port 3000 is in use. Killing process: $PID${NC}"
+            kill -9 $PID
+            sleep 2
+        fi
     fi
     
     npm run dev > server.log 2>&1 &
     SERVER_PID=$!
-    MAX_WAIT=30  
+    MAX_WAIT=30
     
     for ((i = 0; i < MAX_WAIT; i++)); do
         if grep -q "Local:        http://localhost:" server.log; then
@@ -246,59 +291,15 @@ if [ -f "modal-login/temp-data/userData.json" ]; then
     fi
     
     cd ..
+}
+
+if [ -f "modal-login/temp-data/userData.json" ]; then
+    setup_modal_login
     ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
     echo -e "\n${CYAN}${BOLD}[✓] ORG_ID has been set to: ${BOLD}$ORG_ID\n${NC}"
 else
-    cd modal-login
-    echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes, depending on your internet speed...${NC}"
-    npm install --legacy-peer-deps
+    setup_modal_login
     
-    echo -e "\n${CYAN}${BOLD}[✓] Starting the development server...${NC}"
-    if ! command -v ss &>/dev/null; then
-      echo -e "${YELLOW}[!] 'ss' not found. Attempting to install 'iproute2'...${NC}"
-      if command -v apt &>/dev/null; then
-        sudo apt update && sudo apt install -y iproute2
-      elif command -v yum &>/dev/null; then
-        sudo yum install -y iproute
-      elif command -v pacman &>/dev/null; then
-        sudo pacman -Sy iproute2
-      else
-        echo -e "${RED}[✗] Could not install 'ss'. Package manager not found.${NC}"
-        exit 1
-      fi
-    fi
-    
-    PORT_LINE=$(ss -ltnp | grep ":3000 ")
-    if [ -n "$PORT_LINE" ]; then
-      PID=$(echo "$PORT_LINE" | grep -oP 'pid=\K[0-9]+')
-      if [ -n "$PID" ]; then
-        echo -e "${YELLOW}[!] Port 3000 is in use. Killing process: $PID${NC}"
-        kill -9 $PID
-        sleep 2
-      fi
-    fi
-    
-    npm run dev > server.log 2>&1 &
-    SERVER_PID=$!
-    MAX_WAIT=30  
-    
-    for ((i = 0; i < MAX_WAIT; i++)); do
-        if grep -q "Local:        http://localhost:" server.log; then
-            PORT=$(grep "Local:        http://localhost:" server.log | sed -n 's/.*http:\/\/localhost:\([0-9]*\).*/\1/p')
-            if [ -n "$PORT" ]; then
-                echo -e "${GREEN}${BOLD}[✓] Server is running successfully on port $PORT.${NC}"
-                break
-            fi
-        fi
-        sleep 1
-    done
-    
-    if [ $i -eq $MAX_WAIT ]; then
-        echo -e "${RED}${BOLD}[✗] Timeout waiting for server to start.${NC}"
-        kill $SERVER_PID 2>/dev/null || true
-        exit 1
-    fi
-
     echo -e "\n${CYAN}${BOLD}[✓] Detecting system architecture...${NC}"
     ARCH=$(uname -m)
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -325,7 +326,7 @@ else
         local retry=0
         
         while [ $retry -lt $max_retries ]; do
-            http_code=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
+            http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$url" 2>/dev/null)
             if [ "$http_code" = "200" ] || [ "$http_code" = "404" ] || [ "$http_code" = "301" ] || [ "$http_code" = "302" ]; then
                 return 0
             fi
@@ -341,14 +342,9 @@ else
             return 0
         fi
         echo -e "\n${CYAN}${BOLD}[✓] Installing localtunnel...${NC}"
-        npm install -g localtunnel > /dev/null 2>&1
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}${BOLD}[✓] Localtunnel installed successfully.${NC}"
-            return 0
-        else
-            echo -e "${RED}${BOLD}[✗] Failed to install localtunnel.${NC}"
-            return 1
-        fi
+        npm install -g localtunnel > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install localtunnel${NC}"; return 1; }
+        echo -e "${GREEN}${BOLD}[✓] Localtunnel installed successfully.${NC}"
+        return 0
     }
 
     install_cloudflared() {
@@ -356,19 +352,11 @@ else
             echo -e "${GREEN}${BOLD}[✓] Cloudflared is already installed.${NC}"
             return 0
         fi
-        echo -e "\n${YELLOW}${BOLD}[✓] Installing cloudflared...${NC}"
+        echo -e "\n${CYAN}${BOLD}[✓] Installing cloudflared...${NC}"
         CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$CF_ARCH"
-        wget -q --show-progress "$CF_URL" -O cloudflared
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}${BOLD}[✗] Failed to download cloudflared.${NC}"
-            return 1
-        fi
+        wget -q --show-progress --timeout=10 "$CF_URL" -O cloudflared || { echo -e "${RED}${BOLD}[✗] Failed to download cloudflared${NC}"; return 1; }
         chmod +x cloudflared
-        sudo mv cloudflared /usr/local/bin/
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}${BOLD}[✗] Failed to move cloudflared to /usr/local/bin/.${NC}"
-            return 1
-        fi
+        sudo mv cloudflared /usr/local/bin/ || { echo -e "${RED}${BOLD}[✗] Failed to move cloudflared to /usr/local/bin/${NC}"; return 1; }
         echo -e "${GREEN}${BOLD}[✓] Cloudflared installed successfully.${NC}"
         return 0
     }
@@ -378,25 +366,11 @@ else
             echo -e "${GREEN}${BOLD}[✓] ngrok is already installed.${NC}"
             return 0
         fi
-        echo -e "${YELLOW}${BOLD}[✓] Installing ngrok...${NC}"
+        echo -e "\n${CYAN}${BOLD}[✓] Installing ngrok...${NC}"
         NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-$OS-$NGROK_ARCH.tgz"
-        wget -q --show-progress "$NGROK_URL" -O ngrok.tgz
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}${BOLD}[✗] Failed to download ngrok.${NC}"
-            return 1
-        fi
-        tar -xzf ngrok.tgz
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}${BOLD}[✗] Failed to extract ngrok.${NC}"
-            rm ngrok.tgz
-            return 1
-        fi
-        sudo mv ngrok /usr/local/bin/
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}${BOLD}[✗] Failed to move ngrok to /usr/local/bin/.${NC}"
-            rm ngrok.tgz
-            return 1
-        fi
+        wget -q --show-progress --timeout=10 "$NGROK_URL" -O ngrok.tgz || { echo -e "${RED}${BOLD}[✗] Failed to download ngrok${NC}"; return 1; }
+        tar -xzf ngrok.tgz || { echo -e "${RED}${BOLD}[✗] Failed to extract ngrok${NC}"; rm ngrok.tgz; return 1; }
+        sudo mv ngrok /usr/local/bin/ || { echo -e "${RED}${BOLD}[✗] Failed to move ngrok to /usr/local/bin/${NC}"; rm ngrok.tgz; return 1; }
         rm ngrok.tgz
         echo -e "${GREEN}${BOLD}[✓] ngrok installed successfully.${NC}"
         return 0
@@ -414,9 +388,9 @@ else
             URL=$(grep -o "https://[^ ]*" localtunnel_output.log | head -n1)
             
             if [ -n "$URL" ]; then
-                PASS=$(curl -s https://loca.lt/mytunnelpassword)
+                PASS=$(curl -s --connect-timeout 5 https://loca.lt/mytunnelpassword)
                 FORWARDING_URL="$URL"
-                echo -e "${GREEN}${BOLD}[✓] Success! Please visit this website : ${YELLOW}${BOLD}${URL}${GREEN}${BOLD} and then enter this password : ${YELLOW}${BOLD}${PASS}${GREEN}${BOLD} to access the website and then log in using your email.${NC}"
+                echo -e "${GREEN}${BOLD}[✓] Success! Please visit this website: ${YELLOW}${BOLD}${URL}${GREEN}${BOLD} and enter this password: ${YELLOW}${BOLD}${PASS}${GREEN}${BOLD} to log in using your email.${NC}"
                 return 0
             else
                 echo -e "${RED}${BOLD}[✗] Failed to get localtunnel URL.${NC}"
@@ -427,6 +401,7 @@ else
     }
 
     try_cloudflared() {
+        echo -Designated survivor
         echo -e "\n${CYAN}${BOLD}[✓] Trying cloudflared...${NC}"
         if install_cloudflared; then
             echo -e "\n${CYAN}${BOLD}[✓] Starting cloudflared tunnel...${NC}"
@@ -467,7 +442,7 @@ else
         local try_port
         local url=""
         for try_port in $(seq 4040 4045); do
-            local response=$(curl -s "http://localhost:$try_port/api/tunnels" 2>/dev/null)
+            local response=$(curl -s --connect-timeout 5 "http://localhost:$try_port/api/tunnels" 2>/dev/null)
             if [ -n "$response" ]; then
                 url=$(echo "$response" | grep -o '"public_url":"https://[^"]*' | head -n1 | cut -d'"' -f4)
                 if [ -n "$url" ]; then
@@ -487,30 +462,22 @@ else
         echo -e "\n${CYAN}${BOLD}[✓] Trying ngrok...${NC}"
         if install_ngrok; then
             TUNNEL_TYPE="ngrok"
-            while true; do
-                echo -e "\n${YELLOW}${BOLD}To get your authtoken:${NC}"
-                echo "1. Sign up or log in at https://dashboard.ngrok.com"
-                echo "2. Go to 'Your Authtoken' section: https://dashboard.ngrok.com/get-started/your-authtoken"
-                echo "3. Click on the eye icon to reveal your ngrok auth token"
-                echo "4. Copy that auth token and paste it in the prompt below"
-                echo -e "\n${BOLD}Please enter your ngrok authtoken:${NC}"
-                read -p "> " NGROK_TOKEN
+            NGROK_TOKEN=${NGROK_AUTH_TOKEN:-""}
+            if [ -z "$NGROK_TOKEN" ]; then
+                echo -e "${RED}${BOLD}[✗] NGROK_AUTH_TOKEN not set. Please set the environment variable and try again.${NC}"
+                return 1
+            fi
             
-                if [ -z "$NGROK_TOKEN" ]; then
-                    echo -e "${RED}${BOLD}[✗] No token provided. Please enter a valid token.${NC}"
-                    continue
-                fi
-                pkill -f ngrok || true
-                sleep 2
+            pkill -f ngrok || true
+            sleep 2
             
-                ngrok authtoken "$NGROK_TOKEN" 2>/dev/null
-                if [ $? -eq 0 ]; then
-                    echo -e "${GREEN}${BOLD}[✓] Successfully authenticated ngrok!${NC}"
-                    break
-                else
-                    echo -e "${RED}[✗] Authentication failed. Please check your token and try again.${NC}"
-                fi
-            done
+            ngrok authtoken "$NGROK_TOKEN" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}${BOLD}[✓] Successfully authenticated ngrok!${NC}"
+            else
+                echo -e "${RED}${BOLD}[✗] ngrok authentication failed. Please check NGROK_AUTH_TOKEN.${NC}"
+                return 1
+            fi
 
             echo -e "\n${CYAN}${BOLD}[✓] Starting ngrok with method 1...${NC}"
             ngrok http "$PORT" --log=stdout --log-format=json > ngrok_output.log 2>&1 &
@@ -578,50 +545,64 @@ else
             echo -e "${GREEN}${BOLD}[✓] Success! Please visit this website and log in using your email:${NC} ${CYAN}${BOLD}${FORWARDING_URL}${NC}"
         fi
     else
-        echo -e "\n${BLUE}${BOLD}[✓] Don't worry, you can use this manual method. Please follow these instructions:${NC}"
-        echo "1. Open this same WSL/VPS or GPU server on another tab"
-        echo "2. Paste this command into this terminal: ngrok http $PORT"
-        echo "3. It will show a link similar to this: https://xxxx.ngrok-free.app"
-        echo "4. Visit this website and login using your email, this website may take 30 sec to load."
-        echo "5. Now go back to the previous tab, you will see everything will run fine"
+        echo -e "\n${RED}${BOLD}[✗] All tunnel methods failed. Please check network connectivity or set NGROK_AUTH_TOKEN.${NC}"
+        exit 1
     fi
 
     cd ..
     echo -e "\n${CYAN}${BOLD}[↻] Waiting for you to complete the login process...${NC}"
-    while [ ! -f "modal-login/temp-data/userData.json" ]; do
+    MAX_WAIT=300 # 5 minutes timeout
+    counter=0
+    while [ ! -f "modal-login/temp-data/userData.json" ] && [ $counter -lt $MAX_WAIT ]; do
         sleep 3
+        counter=$((counter + 3))
     done
+    
+    if [ ! -f "modal-login/temp-data/userData.json" ]; then
+        echo -e "${RED}${BOLD}[✗] Timeout waiting for login. Please ensure you logged in via the tunnel URL.${NC}"
+        exit 1
+    fi
     
     echo -e "${GREEN}${BOLD}[✓] Success! The userData.json file has been created. Proceeding with remaining setups...${NC}"
     rm -f server.log localtunnel_output.log cloudflared_output.log ngrok_output.log
 
     ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+    if [ -z "$ORG_ID" ]; then
+        echo -e "${RED}${BOLD}[✗] Failed to extract ORG_ID from userData.json${NC}"
+        exit 1
+    fi
     echo -e "\n${CYAN}${BOLD}[✓] ORG_ID has been set to: $ORG_ID\n${NC}"
 
     echo -e "${CYAN}${BOLD}[✓] Waiting for API key to become activated...${NC}"
+    MAX_WAIT=300 # 5 minutes timeout
+    counter=0
     while true; do
-        STATUS=$(curl -s "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
+        STATUS=$(curl -s --connect-timeout 5 "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
         if [[ "$STATUS" == "activated" ]]; then
             echo -e "${GREEN}${BOLD}[✓] Success! API key is activated! Proceeding...\n${NC}"
             break
+        elif [ $counter -ge $MAX_WAIT ]; then
+            echo -e "${RED}${BOLD}[✗] Timeout waiting for API key activation${NC}"
+            exit 1
         else
-            echo "[↻] Waiting for API key to be activated..."
+            echo -e "${CYAN}[↻] Waiting for API key to be activated...${NC}"
             sleep 5
+            counter=$((counter + 5))
         fi
     done
 
     ENV_FILE="$ROOT"/modal-login/.env
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
+        sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE" || { echo -e "${RED}${BOLD}[✗] Failed to update .env file${NC}"; exit 1; }
     else
-        sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
+        sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE" || { echo -e "${RED}${BOLD}[✗] Failed to update .env file${NC}"; exit 1; }
     fi
 fi
 
 echo -e "${CYAN}${BOLD}[✓] Setting up Python virtual environment...${NC}"
-python3 -m venv .venv && . .venv/bin/activate && \
-echo -e "${GREEN}${BOLD}[✓] Python virtual environment set up successfully.${NC}" || \
-echo -e "${RED}${BOLD}[✗] Failed to set up virtual environment.${NC}"
+python3 -m venv .venv || { echo -e "${RED}${BOLD}[✗] Failed to create virtual environment. Ensure python3-venv is installed.${NC}"; exit 1; }
+. .venv/bin/activate || { echo -e "${RED}${BOLD}[✗] Failed to activate virtual environment${NC}"; exit 1; }
+echo -e "${GREEN}${BOLD}[✓] Python virtual environment set up successfully.${NC}"
 
 if [ -z "$CONFIG_PATH" ]; then
     if command -v nvidia-smi &> /dev/null || [ -d "/proc/driver/nvidia" ]; then
@@ -629,12 +610,12 @@ if [ -z "$CONFIG_PATH" ]; then
         CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
         GAME="dapo"
         echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
-        echo -e "${CYAN}${BOLD}[✓] Installing GPU-specific requirements, may take few mins depending on your internet speed...${NC}"
-        pip install -r "$ROOT"/requirements-gpu.txt
-        pip install flash-attn --no-build-isolation
+        echo -e "${CYAN}${BOLD}[✓] Installing GPU-specific requirements...${NC}"
+        pip install -r "$ROOT"/requirements-gpu.txt || { echo -e "${RED}${BOLD}[✗] Failed to install GPU requirements${NC}"; exit 1; }
+        pip install flash-attn --no-build-isolation || { echo -e "${RED}${BOLD}[✗] Failed to install flash-attn${NC}"; exit 1; }
     else
         echo -e "${YELLOW}${BOLD}[✓] No GPU detected, using CPU configuration${NC}"
-        pip install -r "$ROOT"/requirements-cpu.txt
+        pip install -r "$ROOT"/requirements-cpu.txt || { echo -e "${RED}${BOLD}[✗] Failed to install CPU requirements${NC}"; exit 1; }
         CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
         GAME="dapo"
         echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
@@ -642,50 +623,14 @@ if [ -z "$CONFIG_PATH" ]; then
 fi
 
 # 默认不推送模型到 Hugging Face
-if [ -n "${HF_TOKEN}" ]; then
-    HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}
-else
-    HUGGINGFACE_ACCESS_TOKEN="None"
-    echo -e "${YELLOW}${BOLD}[✓] Models will not be pushed to Hugging Face Hub${NC}"
-fi
+HUGGINGFACE_ACCESS_TOKEN="None"
+echo -e "${YELLOW}${BOLD}[✓] Models will not be pushed to Hugging Face Hub${NC}"
 
 echo -e "\n${GREEN}${BOLD}[✓] Good luck in the swarm! Your training session is about to begin.\n${NC}"
 
-# 修改 hivemind.p2p.p2p_daemon 和 hivemind.dht.node 文件，防止重复添加 bootstrap_timeout
-P2P_DAEMON_FILE=$(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)")
-DHT_NODE_FILE=$(python3 -c "import hivemind.dht.node as m; print(m.__file__)")
-
-if [ "$(uname)" = "Darwin" ]; then
-    # macOS
-    # 更新 startup_timeout
-    sed -i '' -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' "$P2P_DAEMON_FILE"
-    # 检查 P2P.create 中是否已存在 bootstrap_timeout
-    if ! grep -q "bootstrap_timeout: float = 120" "$P2P_DAEMON_FILE"; then
-        sed -i '' -E '/startup_timeout: float = 120,/a\'$'\n''    bootstrap_timeout: float = 120,' "$P2P_DAEMON_FILE"
-    fi
-    # 检查 P2P.is_identity_taken 中是否已存在 bootstrap_timeout 调用
-    if ! grep -q "bootstrap_timeout=120" "$P2P_DAEMON_FILE"; then
-        sed -i '' -E '/anonymous_p2p = await cls\.create\(/a\'$'\n''        bootstrap_timeout=120,' "$P2P_DAEMON_FILE"
-    fi
-    # 更新 dht.node
-    sed -i '' -e 's/bootstrap_timeout: Optional\[float\] = None/bootstrap_timeout: float = 120/' "$DHT_NODE_FILE"
-    sed -i '' -e 's/p2p = await P2P.create(\*\*kwargs)/p2p = await P2P.create(bootstrap_timeout=120, **kwargs)/' "$DHT_NODE_FILE"
-else
-    # Linux
-    # 更新 startup_timeout
-    sed -i -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' "$P2P_DAEMON_FILE"
-    # 检查 P2P.create 中是否已存在 bootstrap_timeout
-    if ! grep -q "bootstrap_timeout: float = 120" "$P2P_DAEMON_FILE"; then
-        sed -i -E '/startup_timeout: float = 120,/a\    bootstrap_timeout: float = 120,' "$P2P_DAEMON_FILE"
-    fi
-    # 检查 P2P.is_identity_taken 中是否已存在 bootstrap_timeout 调用
-    if ! grep -q "bootstrap_timeout=120" "$P2P_DAEMON_FILE"; then
-        sed -i -E '/anonymous_p2p = await cls\.create\(/a\        bootstrap_timeout=120,' "$P2P_DAEMON_FILE"
-    fi
-    # 更新 dht.node
-    sed -i -e 's/bootstrap_timeout: Optional\[float\] = None/bootstrap_timeout: float = 120/' "$DHT_NODE_FILE"
-    sed -i -e 's/p2p = await P2P.create(\*\*kwargs)/p2p = await P2P.create(bootstrap_timeout=120, **kwargs)/' "$DHT_NODE_FILE"
-fi
+# 使用新脚本的简化 Hivemind 修改逻辑
+[ "$(uname)" = "Darwin" ] && sed -i '' -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' $(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)") || sed -i -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' $(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)")
+[ "$(uname)" = "Darwin" ] && sed -i '' -e '/bootstrap_timeout: Optional\[float\] = None/s//bootstrap_timeout: float = 120/' $(python3 -c 'import hivemind.dht.node as m; print(m.__file__)') || sed -i -e '/bootstrap_timeout: Optional\[float\] = None/s//bootstrap_timeout: float = 120/' $(python3 -c 'import hivemind.dht.node as m; print(m.__file__)')
 
 if [ -n "$ORG_ID" ]; then
     python -m hivemind_exp.gsm8k.train_single_gpu \
@@ -694,7 +639,7 @@ if [ -n "$ORG_ID" ]; then
         --modal_org_id "$ORG_ID" \
         --contract_address "$SWARM_CONTRACT" \
         --config "$CONFIG_PATH" \
-        --game "$GAME"
+        --game "$GAME" || { echo -e "${RED}${BOLD}[✗] Training failed${NC}"; exit 1; }
 else
     python -m hivemind_exp.gsm8k.train_single_gpu \
         --hf_token "$HUGGINGFACE_ACCESS_TOKEN" \
@@ -703,7 +648,7 @@ else
         --initial_peers "$PEER_MULTI_ADDRS" \
         --host_maddr "$HOST_MULTI_ADDRS" \
         --config "$CONFIG_PATH" \
-        --game "$GAME"
+        --game "$GAME" || { echo -e "${RED}${BOLD}[✗] Training failed${NC}"; exit 1; }
 fi
 
 wait
