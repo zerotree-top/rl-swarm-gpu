@@ -1,6 +1,7 @@
 #!/bin/bash
 
 ROOT=$PWD
+USERDATA_FILE="$ROOT/modal-login/temp-data/userData.json"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,44 +29,47 @@ PEER_MULTI_ADDRS=${PEER_MULTI_ADDRS:-$DEFAULT_PEER_MULTI_ADDRS}
 DEFAULT_HOST_MULTI_ADDRS="/ip4/0.0.0.0/tcp/38331"
 HOST_MULTI_ADDRS=${HOST_MULTI_ADDRS:-$DEFAULT_HOST_MULTI_ADDRS}
 
-DEFAULT_IDENTITY_PATH="$ROOT"/swarm.pem
+DEFAULT_IDENTITY_PATH="$ROOT/swarm.pem"
 IDENTITY_PATH=${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}
 
 SMALL_SWARM_CONTRACT="0x69C6e1D608ec64885E7b185d39b04B491a71768C"
 BIG_SWARM_CONTRACT="0x6947c6E196a48B77eFa9331EC1E3e45f3Ee5Fd58"
 
+# 安装系统依赖
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-  if command -v apt &>/dev/null; then
-    echo -e "${CYAN}${BOLD}[✓] Debian/Ubuntu detected. Installing build-essential, gcc, g++...${NC}"
-    sudo apt update > /dev/null 2>&1
-    sudo apt install -y build-essential gcc g++ > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
-  elif command -v yum &>/dev/null; then
-    echo -e "${CYAN}${BOLD}[✓] RHEL/CentOS detected. Installing Development Tools...${NC}"
-    sudo yum groupinstall -y "Development Tools" > /dev/null 2>&1
-    sudo yum install -y gcc gcc-c++ > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
-  elif command -v pacman &>/dev/null; then
-    echo -e "${CYAN}${BOLD}[✓] Arch Linux detected. Installing base-devel...${NC}"
-    sudo pacman -Sy --noconfirm base-devel gcc > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
-  else
-    echo -e "${RED}${BOLD}[✗] Linux detected but unsupported package manager.${NC}"
-    exit 1
-  fi
+    if command -v apt &>/dev/null; then
+        echo -e "${CYAN}${BOLD}[✓] Debian/Ubuntu detected. Installing build-essential, gcc, g++...${NC}"
+        sudo apt update > /dev/null 2>&1
+        sudo apt install -y build-essential gcc g++ python3-venv iproute2 > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
+    elif command -v yum &>/dev/null; then
+        echo -e "${CYAN}${BOLD}[✓] RHEL/CentOS detected. Installing Development Tools...${NC}"
+        sudo yum groupinstall -y "Development Tools" > /dev/null 2>&1
+        sudo yum install -y gcc gcc-c++ python3 iproute > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
+    elif command -v pacman &>/dev/null; then
+        echo -e "${CYAN}${BOLD}[✓] Arch Linux detected. Installing base-devel...${NC}"
+        sudo pacman -Sy --noconfirm base-devel gcc python3 iproute2 > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install build tools${NC}"; exit 1; }
+    else
+        echo -e "${RED}${BOLD}[✗] Linux detected but unsupported package manager.${NC}"
+        exit 1
+    fi
 elif [[ "$OSTYPE" == "darwin"* ]]; then
-  echo -e "${CYAN}${BOLD}[✓] macOS detected. Installing Xcode Command Line Tools...${NC}"
-  xcode-select --install > /dev/null 2>&1 || true
+    echo -e "${CYAN}${BOLD}[✓] macOS detected. Installing Xcode Command Line Tools...${NC}"
+    xcode-select --install > /dev/null 2>&1 || true
 else
-  echo -e "${RED}${BOLD}[✗] Unsupported OS: $OSTYPE${NC}"
-  exit 1
+    echo -e "${RED}${BOLD}[✗] Unsupported OS: $OSTYPE${NC}"
+    exit 1
 fi
 
+# 检查 gcc
 if command -v gcc &>/dev/null; then
-  export CC=$(command -v gcc)
-  echo -e "${CYAN}${BOLD}[✓] Exported CC=$CC${NC}"
+    export CC=$(command -v gcc)
+    echo -e "${CYAN}${BOLD}[✓] Exported CC=$CC${NC}"
 else
-  echo -e "${RED}${BOLD}[✗] gcc not found. Please install it manually.${NC}"
-  exit 1
+    echo -e "${RED}${BOLD}[✗] gcc not found. Please install it manually.${NC}"
+    exit 1
 fi
 
+# 检查 CUDA 安装
 check_cuda_installation() {
     echo -e "\n${CYAN}${BOLD}[✓] Checking GPU and CUDA installation...${NC}"
     
@@ -155,7 +159,7 @@ check_cuda_installation() {
         echo -e "${CYAN}${BOLD}[✓] Automatically installing CUDA and NVCC...${NC}"
         CUDA_SCRIPT_URLS=(
             "https://raw.githubusercontent.com/zunxbt/gensyn-testnet/main/cuda.sh"
-            "https://example.com/backup/cuda.sh" # 备用 URL，可替换为实际地址
+            "https://example.com/backup/cuda.sh" # 请替换为实际备用 URL
         )
         for url in "${CUDA_SCRIPT_URLS[@]}"; do
             if bash <(curl -sSL --connect-timeout 10 "$url"); then
@@ -229,20 +233,24 @@ echo -e "${CYAN}${BOLD}[✓] Selected swarm: [B] Math Hard${NC}"
 PARAM_B=0.5
 echo -e "${CYAN}${BOLD}[✓] Selected parameter size: 0.5 billion${NC}"
 
+# 清理函数
 cleanup() {
     echo -e "${YELLOW}${BOLD}[✓] Shutting down processes...${NC}"
     kill $SERVER_PID 2>/dev/null || true
     kill $TUNNEL_PID 2>/dev/null || true
-    rm -f server.log localtunnel_output.log cloudflared_output.log ngrok_output.log
+    rm -f "$ROOT/modal-login/server.log" "$ROOT/localtunnel_output.log" "$ROOT/cloudflared_output.log" "$ROOT/ngrok_output.log"
     exit 0
 }
 
 trap cleanup INT
 
+# 设置 modal-login 服务
 setup_modal_login() {
-    cd modal-login
+    cd "$ROOT/modal-login"
+    mkdir -p temp-data
+    chmod 755 temp-data
     echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes...${NC}"
-    npm install --legacy-peer-deps > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install npm dependencies${NC}"; exit 1; }
+    npm install --legacy-peer-deps || { echo -e "${RED}${BOLD}[✗] Failed to install npm dependencies${NC}"; npm install --legacy-peer-deps; exit 1; }
     
     echo -e "\n${CYAN}${BOLD}[✓] Starting the development server...${NC}"
     if ! command -v ss &>/dev/null; then
@@ -264,20 +272,25 @@ setup_modal_login() {
         PID=$(echo "$PORT_LINE" | grep -oP 'pid=\K[0-9]+')
         if [ -n "$PID" ]; then
             echo -e "${YELLOW}[!] Port 3000 is in use. Killing process: $PID${NC}"
-            kill -9 $PID
-            sleep 2
+            sudo kill -9 $PID
+            sleep 5
+            if ss -ltnp | grep ":3000 " 2>/dev/null; then
+                echo -e "${RED}${BOLD}[✗] Failed to release port 3000${NC}"
+                exit 1
+            fi
         fi
     fi
     
     npm run dev > server.log 2>&1 &
     SERVER_PID=$!
-    MAX_WAIT=30
+    MAX_WAIT=60
     
     for ((i = 0; i < MAX_WAIT; i++)); do
         if grep -q "Local:        http://localhost:" server.log; then
             PORT=$(grep "Local:        http://localhost:" server.log | sed -n 's/.*http:\/\/localhost:\([0-9]*\).*/\1/p')
             if [ -n "$PORT" ]; then
                 echo -e "${GREEN}${BOLD}[✓] Server is running successfully on port $PORT.${NC}"
+                curl -s http://localhost:$PORT > /dev/null && echo -e "${GREEN}${BOLD}[✓] Server is accessible at http://localhost:$PORT${NC}" || echo -e "${YELLOW}${BOLD}[!] Server started but may not be accessible${NC}"
                 break
             fi
         fi
@@ -285,17 +298,24 @@ setup_modal_login() {
     done
     
     if [ $i -eq $MAX_WAIT ]; then
-        echo -e "${RED}${BOLD}[✗] Timeout waiting for server to start.${NC}"
+        echo -e "${RED}${BOLD}[✗] Timeout waiting for server to start. Check server.log for details.${NC}"
+        cat server.log
         kill $SERVER_PID 2>/dev/null || true
         exit 1
     fi
     
-    cd ..
+    cd "$ROOT"
 }
 
-if [ -f "modal-login/temp-data/userData.json" ]; then
+# 检查是否已有 userData.json
+if [ -f "$USERDATA_FILE" ]; then
     setup_modal_login
-    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' "$USERDATA_FILE")
+    if [ -z "$ORG_ID" ]; then
+        echo -e "${RED}${BOLD}[✗] Failed to extract ORG_ID from userData.json${NC}"
+        cat "$USERDATA_FILE"
+        exit 1
+    fi
     echo -e "\n${CYAN}${BOLD}[✓] ORG_ID has been set to: ${BOLD}$ORG_ID\n${NC}"
 else
     setup_modal_login
@@ -342,7 +362,7 @@ else
             return 0
         fi
         echo -e "\n${CYAN}${BOLD}[✓] Installing localtunnel...${NC}"
-        npm install -g localtunnel > /dev/null 2>&1 || { echo -e "${RED}${BOLD}[✗] Failed to install localtunnel${NC}"; return 1; }
+        npm install -g localtunnel || { echo -e "${RED}${BOLD}[✗] Failed to install localtunnel${NC}"; npm install -g localtunnel; return 1; }
         echo -e "${GREEN}${BOLD}[✓] Localtunnel installed successfully.${NC}"
         return 0
     }
@@ -381,11 +401,11 @@ else
         if install_localtunnel; then
             echo -e "\n${CYAN}${BOLD}[✓] Starting localtunnel on port $PORT...${NC}"
             TUNNEL_TYPE="localtunnel"
-            lt --port $PORT > localtunnel_output.log 2>&1 &
+            lt --port $PORT > "$ROOT/localtunnel_output.log" 2>&1 &
             TUNNEL_PID=$!
             
             sleep 5
-            URL=$(grep -o "https://[^ ]*" localtunnel_output.log | head -n1)
+            URL=$(grep -o "https://[^ ]*" "$ROOT/localtunnel_output.log" | head -n1)
             
             if [ -n "$URL" ]; then
                 PASS=$(curl -s --connect-timeout 5 https://loca.lt/mytunnelpassword)
@@ -401,18 +421,17 @@ else
     }
 
     try_cloudflared() {
-        echo -Designated survivor
         echo -e "\n${CYAN}${BOLD}[✓] Trying cloudflared...${NC}"
         if install_cloudflared; then
             echo -e "\n${CYAN}${BOLD}[✓] Starting cloudflared tunnel...${NC}"
             TUNNEL_TYPE="cloudflared"
-            cloudflared tunnel --url http://localhost:$PORT > cloudflared_output.log 2>&1 &
+            cloudflared tunnel --url http://localhost:$PORT > "$ROOT/cloudflared_output.log" 2>&1 &
             TUNNEL_PID=$!
             
             counter=0
             MAX_WAIT=10
             while [ $counter -lt $MAX_WAIT ]; do
-                CLOUDFLARED_URL=$(grep -o 'https://[^ ]*\.trycloudflare.com' cloudflared_output.log | head -n1)
+                CLOUDFLARED_URL=$(grep -o 'https://[^ ]*\.trycloudflare.com' "$ROOT/cloudflared_output.log" | head -n1)
                 if [ -n "$CLOUDFLARED_URL" ]; then
                     echo -e "${GREEN}${BOLD}[✓] Cloudflared tunnel is started successfully.${NC}"
                     echo -e "\n${CYAN}${BOLD}[✓] Checking if cloudflared URL is working...${NC}"
@@ -434,7 +453,7 @@ else
     }
 
     get_ngrok_url_method1() {
-        local url=$(grep -o '"url":"https://[^"]*' ngrok_output.log 2>/dev/null | head -n1 | cut -d'"' -f4)
+        local url=$(grep -o '"url":"https://[^"]*' "$ROOT/ngrok_output.log" 2>/dev/null | head -n1 | cut -d'"' -f4)
         echo "$url"
     }
 
@@ -454,7 +473,7 @@ else
     }
 
     get_ngrok_url_method3() {
-        local url=$(grep -o "Forwarding.*https://[^ ]*" ngrok_output.log 2>/dev/null | grep -o "https://[^ ]*" | head -n1)
+        local url=$(grep -o "Forwarding.*https://[^ ]*" "$ROOT/ngrok_output.log" 2>/dev/null | grep -o "https://[^ ]*" | head -n1)
         echo "$url"
     }
 
@@ -464,7 +483,7 @@ else
             TUNNEL_TYPE="ngrok"
             NGROK_TOKEN=${NGROK_AUTH_TOKEN:-""}
             if [ -z "$NGROK_TOKEN" ]; then
-                echo -e "${RED}${BOLD}[✗] NGROK_AUTH_TOKEN not set. Please set the environment variable and try again.${NC}"
+                echo -e "${YELLOW}${BOLD}[!] NGROK_AUTH_TOKEN not set. Falling back to other tunnel methods.${NC}"
                 return 1
             fi
             
@@ -480,7 +499,7 @@ else
             fi
 
             echo -e "\n${CYAN}${BOLD}[✓] Starting ngrok with method 1...${NC}"
-            ngrok http "$PORT" --log=stdout --log-format=json > ngrok_output.log 2>&1 &
+            ngrok http "$PORT" --log=stdout --log-format=json > "$ROOT/ngrok_output.log" 2>&1 &
             TUNNEL_PID=$!
             sleep 5
             
@@ -494,7 +513,7 @@ else
             fi
 
             echo -e "\n${CYAN}${BOLD}[✓] Starting ngrok with method 2...${NC}"
-            ngrok http "$PORT" > ngrok_output.log 2>&1 &
+            ngrok http "$PORT" > "$ROOT/ngrok_output.log" 2>&1 &
             TUNNEL_PID=$!
             sleep 5
             
@@ -508,7 +527,7 @@ else
             fi
 
             echo -e "\n${CYAN}${BOLD}[✓] Starting ngrok with method 3...${NC}"
-            ngrok http "$PORT" --log=stdout > ngrok_output.log 2>&1 &
+            ngrok http "$PORT" --log=stdout > "$ROOT/ngrok_output.log" 2>&1 &
             TUNNEL_PID=$!
             sleep 5
             
@@ -525,15 +544,13 @@ else
     }
 
     start_tunnel() {
-        if try_localtunnel; then
+        if try_ngrok; then
             return 0
         fi
-        
         if try_cloudflared; then
             return 0
         fi
-        
-        if try_ngrok; then
+        if try_localtunnel; then
             return 0
         fi
         return 1
@@ -549,40 +566,53 @@ else
         exit 1
     fi
 
-    cd ..
     echo -e "\n${CYAN}${BOLD}[↻] Waiting for you to complete the login process...${NC}"
-    MAX_WAIT=300 # 5 minutes timeout
+    MAX_WAIT=600 # 10 minutes timeout
     counter=0
-    while [ ! -f "modal-login/temp-data/userData.json" ] && [ $counter -lt $MAX_WAIT ]; do
+    while [ ! -f "$USERDATA_FILE" ] && [ $counter -lt $MAX_WAIT ]; do
+        echo -e "${CYAN}[↻] Checking for userData.json ($counter/$MAX_WAIT seconds)...${NC}"
+        ls -l "$ROOT/modal-login/temp-data/" 2>/dev/null || echo -e "${YELLOW}[!] Directory not found${NC}"
         sleep 3
         counter=$((counter + 3))
     done
     
-    if [ ! -f "modal-login/temp-data/userData.json" ]; then
-        echo -e "${RED}${BOLD}[✗] Timeout waiting for login. Please ensure you logged in via the tunnel URL.${NC}"
+    if [ -f "$USERDATA_FILE" ]; then
+        echo -e "${GREEN}${BOLD}[✓] userData.json found. Verifying content...${NC}"
+        if ! grep -q "orgId" "$USERDATA_FILE"; then
+            echo -e "${RED}${BOLD}[✗] userData.json is empty or invalid${NC}"
+            cat "$USERDATA_FILE"
+            cat "$ROOT/modal-login/server.log"
+            exit 1
+        fi
+    else
+        echo -e "${RED}${BOLD}[✗] Timeout waiting for login. File not found at $USERDATA_FILE${NC}"
+        ls -l "$ROOT/modal-login/temp-data/" 2>/dev/null
+        cat "$ROOT/modal-login/server.log"
         exit 1
     fi
     
     echo -e "${GREEN}${BOLD}[✓] Success! The userData.json file has been created. Proceeding with remaining setups...${NC}"
-    rm -f server.log localtunnel_output.log cloudflared_output.log ngrok_output.log
+    rm -f "$ROOT/modal-login/server.log" "$ROOT/localtunnel_output.log" "$ROOT/cloudflared_output.log" "$ROOT/ngrok_output.log"
 
-    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' "$USERDATA_FILE")
     if [ -z "$ORG_ID" ]; then
         echo -e "${RED}${BOLD}[✗] Failed to extract ORG_ID from userData.json${NC}"
+        cat "$USERDATA_FILE"
         exit 1
     fi
     echo -e "\n${CYAN}${BOLD}[✓] ORG_ID has been set to: $ORG_ID\n${NC}"
 
     echo -e "${CYAN}${BOLD}[✓] Waiting for API key to become activated...${NC}"
-    MAX_WAIT=300 # 5 minutes timeout
+    MAX_WAIT=300
     counter=0
     while true; do
-        STATUS=$(curl -s --connect-timeout 5 "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
+        STATUS=$(curl -s --connect-timeout 5 "http://localhost:$PORT/api/get-api-key-status?orgId=$ORG_ID")
         if [[ "$STATUS" == "activated" ]]; then
             echo -e "${GREEN}${BOLD}[✓] Success! API key is activated! Proceeding...\n${NC}"
             break
         elif [ $counter -ge $MAX_WAIT ]; then
             echo -e "${RED}${BOLD}[✗] Timeout waiting for API key activation${NC}"
+            cat "$ROOT/modal-login/server.log"
             exit 1
         else
             echo -e "${CYAN}[↻] Waiting for API key to be activated...${NC}"
@@ -591,7 +621,7 @@ else
         fi
     done
 
-    ENV_FILE="$ROOT"/modal-login/.env
+    ENV_FILE="$ROOT/modal-login/.env"
     if [[ "$OSTYPE" == "darwin"* ]]; then
         sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE" || { echo -e "${RED}${BOLD}[✗] Failed to update .env file${NC}"; exit 1; }
     else
@@ -599,11 +629,13 @@ else
     fi
 fi
 
+# 设置 Python 虚拟环境
 echo -e "${CYAN}${BOLD}[✓] Setting up Python virtual environment...${NC}"
 python3 -m venv .venv || { echo -e "${RED}${BOLD}[✗] Failed to create virtual environment. Ensure python3-venv is installed.${NC}"; exit 1; }
 . .venv/bin/activate || { echo -e "${RED}${BOLD}[✗] Failed to activate virtual environment${NC}"; exit 1; }
 echo -e "${GREEN}${BOLD}[✓] Python virtual environment set up successfully.${NC}"
 
+# 根据 GPU/CPU 选择配置
 if [ -z "$CONFIG_PATH" ]; then
     if command -v nvidia-smi &> /dev/null || [ -d "/proc/driver/nvidia" ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU detected${NC}"
@@ -611,27 +643,28 @@ if [ -z "$CONFIG_PATH" ]; then
         GAME="dapo"
         echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
         echo -e "${CYAN}${BOLD}[✓] Installing GPU-specific requirements...${NC}"
-        pip install -r "$ROOT"/requirements-gpu.txt || { echo -e "${RED}${BOLD}[✗] Failed to install GPU requirements${NC}"; exit 1; }
+        pip install -r "$ROOT/requirements-gpu.txt" || { echo -e "${RED}${BOLD}[✗] Failed to install GPU requirements${NC}"; exit 1; }
         pip install flash-attn --no-build-isolation || { echo -e "${RED}${BOLD}[✗] Failed to install flash-attn${NC}"; exit 1; }
     else
         echo -e "${YELLOW}${BOLD}[✓] No GPU detected, using CPU configuration${NC}"
-        pip install -r "$ROOT"/requirements-cpu.txt || { echo -e "${RED}${BOLD}[✗] Failed to install CPU requirements${NC}"; exit 1; }
+        pip install -r "$ROOT/requirements-cpu.txt" || { echo -e "${RED}${BOLD}[✗] Failed to install CPU requirements${NC}"; exit 1; }
         CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
         GAME="dapo"
         echo -e "${CYAN}${BOLD}[✓] Config file: ${BOLD}$CONFIG_PATH\n${NC}"
     fi
 fi
 
-# 默认不推送模型到 Hugging Face
+# 设置 Hugging Face 令牌
 HUGGINGFACE_ACCESS_TOKEN="None"
 echo -e "${YELLOW}${BOLD}[✓] Models will not be pushed to Hugging Face Hub${NC}"
 
 echo -e "\n${GREEN}${BOLD}[✓] Good luck in the swarm! Your training session is about to begin.\n${NC}"
 
-# 使用新脚本的简化 Hivemind 修改逻辑
+# 修改 Hivemind 超时设置
 [ "$(uname)" = "Darwin" ] && sed -i '' -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' $(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)") || sed -i -E 's/(startup_timeout: *float *= *)[0-9.]+/\1120/' $(python3 -c "import hivemind.p2p.p2p_daemon as m; print(m.__file__)")
 [ "$(uname)" = "Darwin" ] && sed -i '' -e '/bootstrap_timeout: Optional\[float\] = None/s//bootstrap_timeout: float = 120/' $(python3 -c 'import hivemind.dht.node as m; print(m.__file__)') || sed -i -e '/bootstrap_timeout: Optional\[float\] = None/s//bootstrap_timeout: float = 120/' $(python3 -c 'import hivemind.dht.node as m; print(m.__file__)')
 
+# 执行训练
 if [ -n "$ORG_ID" ]; then
     python -m hivemind_exp.gsm8k.train_single_gpu \
         --hf_token "$HUGGINGFACE_ACCESS_TOKEN" \
