@@ -566,15 +566,17 @@ else
         exit 1
     fi
 
-    echo -e "\n${CYAN}${BOLD}[↻] Waiting for you to complete the login process...${NC}"
-    MAX_WAIT=600 # 10 minutes timeout
-    counter=0
-    while [ ! -f "$USERDATA_FILE" ] && [ $counter -lt $MAX_WAIT ]; do
+   echo -e "\n${CYAN}${BOLD}[↻] Waiting for you to complete the login process...${NC}"
+MAX_WAIT=600 # 10 minutes timeout
+counter=0
+while [ ! -f "$USERDATA_FILE" ] && [ $counter -lt $MAX_WAIT ]; do
+    if [ $((counter % 15)) -eq 0 ]; then
         echo -e "${CYAN}[↻] Checking for userData.json ($counter/$MAX_WAIT seconds)...${NC}"
         ls -l "$ROOT/modal-login/temp-data/" 2>/dev/null || echo -e "${YELLOW}[!] Directory not found${NC}"
-        sleep 3
-        counter=$((counter + 3))
-    done
+    fi
+    sleep 1
+    counter=$((counter + 1))
+done
     
     if [ -f "$USERDATA_FILE" ]; then
         echo -e "${GREEN}${BOLD}[✓] userData.json found. Verifying content...${NC}"
